@@ -19,6 +19,7 @@ defaulthandlers() = AbstractHandler[
     Handler{:macrocall}(),
     Handler{:vcat}(),
     Handler{:hcat}(),
+    Handler{:(=)}(),
     Handler{:.=}(),
     DotCallHandler(),
     DotUpdateHandler(),
@@ -58,6 +59,56 @@ end
 
 handle(::Handler{:hcat}, lower, ex) =
     :($(Base.hcat)($(map(lower, ex.args)...)))
+
+function handle(h::Handler{:(=)}, lower, ex)
+    lhs = Any[ex.args[1]]
+    rhs = ex.args[2]
+    while accept(h, rhs)
+        push!(lhs, rhs.args[1])
+        rhs = rhs.args[2]
+    end
+    @gensym rhsvalue
+    args = mapfoldl(append!, lhs, init=Any[:($rhsvalue = $(lower(rhs)))]) do l
+        handle_assignment(lower, l, rhsvalue)
+    end
+    return Expr(:block, args..., rhsvalue)
+end
+
+function handle_assignment(lower, lhs, rhs)
+    if isexpr(lhs, :ref)
+        statements = []
+        if length(lhs.args) == 1
+            collection = lhs.args[1]
+            indices = []
+        else
+            if lhs.args[1] isa Symbol
+                collection = lhs.args[1]
+            else
+                @gensym collection
+                push!(statements, :($collection = $(lhs.args[1])))
+            end
+            indices = lower_indices(lower, collection, lhs.args[2:end])
+        end
+        push!(statements, Expr(:call, Base.setindex!, collection, rhs, indices...))
+        return statements
+    end
+    return [:($lhs = $rhs)]
+end
+
+lower_indices(lower, collection, indices) =
+    map(index -> lower_index(lower, collection, index), indices)
+
+function lower_index(lower, collection, index)
+    if accept(DotCallHandler(), index)
+        _lower_index(ex) = lower_index(lower, collection, ex)
+        return handle(DotCallHandler(), _lower_index, index)
+    elseif isexpr(index, :call)
+        return Expr(:call, lower_indices(lower, collection, index.args)...)
+    elseif index === :end
+        return :($(Base.lastindex)($collection))
+    end
+    return lower(index)
+end
 
 function handle(::Handler{:.=}, lower, ex)
     @assert length(ex.args) == 2

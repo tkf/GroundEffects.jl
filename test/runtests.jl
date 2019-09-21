@@ -12,6 +12,27 @@ expressions_to_be_lowered = quote
     [1, 2] .== [1, 3]
     [1, 2] .!= [1, 3]
     begin
+        x = [1, 2, 3]
+        ans = begin
+            x[1] = 10
+        end
+        (ans, x)
+    end
+    begin
+        x = [1, 2, 3]
+        ans = begin
+            x[end] = 30
+        end
+        (ans, x)
+    end
+    begin
+        x = [1, 2, 3]
+        ans = begin
+            x[end÷2] = 10
+        end
+        (ans, x)
+    end
+    begin
         x = zeros(3)
         x .= 1
     end
