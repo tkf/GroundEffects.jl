@@ -13,18 +13,19 @@ surface syntax.  The lowered output can be used as an output of macro.
 lower(ex::Expr) = lower(defaulthandlers(), ex)
 lower(handlers::AbstractVector, ex::Expr) = Dispatcher(handlers)(ex)
 
-abstract type AbstractHandler end
-
-defaulthandlers() = AbstractHandler[
-    Handler{:macrocall}(),
-    Handler{:vcat}(),
-    Handler{:hcat}(),
-    Handler{:(=)}(),
-    Handler{:.=}(),
-    DotCallHandler(),
-    DotUpdateHandler(),
-    RecursionHandler(),
+defaulthandlers() = Any[
+    handle_macrocall,
+    handle_vcat,
+    handle_hcat,
+    handle_assignment,
+    handle_inplace_materialize,
+    handle_dotcall,
+    handle_dotupdate,
+    handle_recursion,
 ]
+
+struct Defer end
+const defer = Defer()
 
 struct Dispatcher
     handlers::Vector{Any}
@@ -32,21 +33,19 @@ end
 
 function (lower::Dispatcher)(ex)
     for h in lower.handlers
-        if accept(h, ex)
-            return handle(h, lower, ex)
-        end
+        y = h(lower, ex)
+        y === defer || return y
     end
     return ex
 end
 
-struct Handler{head} <: AbstractHandler end
+handle_recursion(lower, ::Any) = defer
+handle_recursion(lower, ex::Expr) = Expr(ex.head, map(lower, ex.args)...)
 
-accept(::Any, ::Any) = false
-accept(::Handler{head}, ex::Expr) where head = ex.head == head
+handle_macrocall(_, ex) = isexpr(ex, :macrocall) ? ex : defer
 
-handle(::Handler{:macrocall}, _, ex) = ex
-
-function handle(::Handler{:vcat}, lower, ex)
+function handle_vcat(lower, ex)
+    isexpr(ex, :vcat) || return defer
     if all(isexpr.(ex.args, :row))
         rows = Tuple(length(a.args) for a in ex.args)
         return :($(Base.hvcat)($rows, $((
@@ -57,24 +56,25 @@ function handle(::Handler{:vcat}, lower, ex)
     end
 end
 
-handle(::Handler{:hcat}, lower, ex) =
-    :($(Base.hcat)($(map(lower, ex.args)...)))
+handle_hcat(lower, ex) =
+    isexpr(ex, :hcat) ? :($(Base.hcat)($(map(lower, ex.args)...))) : defer
 
-function handle(h::Handler{:(=)}, lower, ex)
+function handle_assignment(lower, ex)
+    isexpr(ex, :(=)) || return defer
     lhs = Any[ex.args[1]]
     rhs = ex.args[2]
-    while accept(h, rhs)
+    while isexpr(rhs, :(=))
         push!(lhs, rhs.args[1])
         rhs = rhs.args[2]
     end
     @gensym rhsvalue
     args = mapfoldl(append!, lhs, init=Any[:($rhsvalue = $(lower(rhs)))]) do l
-        handle_assignment(lower, l, rhsvalue)
+        _handle_assignment(lower, l, rhsvalue)
     end
     return Expr(:block, args..., rhsvalue)
 end
 
-function handle_assignment(lower, lhs, rhs)
+function _handle_assignment(lower, lhs, rhs)
     if isexpr(lhs, :ref)
         statements = []
         if length(lhs.args) == 1
@@ -99,10 +99,12 @@ lower_indices(lower, collection, indices) =
     map(index -> lower_index(lower, collection, index), indices)
 
 function lower_index(lower, collection, index)
-    if accept(DotCallHandler(), index)
-        _lower_index(ex) = lower_index(lower, collection, ex)
-        return handle(DotCallHandler(), _lower_index, index)
-    elseif isexpr(index, :call)
+    ex = handle_dotcall(index) do ex
+        lower_index(lower, collection, ex)
+    end
+    ex === defer || return ex
+
+    if isexpr(index, :call)
         return Expr(:call, lower_indices(lower, collection, index.args)...)
     elseif index === :end
         return :($(Base.lastindex)($collection))
@@ -110,13 +112,12 @@ function lower_index(lower, collection, index)
     return lower(index)
 end
 
-function handle(::Handler{:.=}, lower, ex)
+function handle_inplace_materialize(lower, ex)
+    isexpr(ex, :.=) || return defer
     @assert length(ex.args) == 2
     a1, a2 = map(lower, ex.args)
     return :($(Base.materialize!)($a1, $(Base.broadcasted)(identity, $a2)))
 end
-
-struct DotCallHandler <: AbstractHandler end
 
 function isdotopcall(ex)
     ex isa Expr || return false
@@ -127,10 +128,10 @@ end
 isdotcall(ex) =
     isexpr(ex, :.) && length(ex.args) == 2 && isexpr(ex.args[2], :tuple)
 
-accept(::DotCallHandler, ex::Expr) = isdotopcall(ex) || isdotcall(ex)
-
-handle(::DotCallHandler, lower, ex) =
-    Expr(:call, Base.materialize, handle_lazy_dotcall(lower, ex))
+function handle_dotcall(lower, ex)
+    isdotcall(ex) || isdotopcall(ex) || return defer
+    return Expr(:call, Base.materialize, handle_lazy_dotcall(lower, ex))
+end
 
 function handle_lazy_dotcall(lower, ex)
     if isdotcall(ex)
@@ -149,14 +150,10 @@ function handle_lazy_dotcall(lower, ex)
     return Expr(:call, Base.broadcasted, args...)
 end
 
-struct DotUpdateHandler <: AbstractHandler end
-
-_dotupdatematch(ex) = match(r"^(\.)?(([^.]+)=)$", string(ex.head))
-
-accept(::DotUpdateHandler, ex::Expr) = _dotupdatematch(ex) !== nothing
-
-function handle(::DotUpdateHandler, lower, ex)
-    m = _dotupdatematch(ex)
+function handle_dotupdate(lower, ex)
+    ex isa Expr || return defer
+    m = match(r"^(\.)?(([^.]+)=)$", string(ex.head))
+    m === nothing && return defer
     # e.g., `ex.head == :.+=`
     op = Symbol(m.captures[3])  # e.g., `:+`
     @assert length(ex.args) == 2
@@ -178,10 +175,5 @@ function handle(::DotUpdateHandler, lower, ex)
         )
     end
 end
-
-struct RecursionHandler <: AbstractHandler end
-
-accept(::RecursionHandler, ::Expr) = true
-handle(::RecursionHandler, lower, ex) = Expr(ex.head, map(lower, ex.args)...)
 
 end # module
