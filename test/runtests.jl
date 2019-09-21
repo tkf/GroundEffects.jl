@@ -11,6 +11,9 @@ expressions_to_be_lowered = quote
     identity.(ones(2) .+ 2)
     [1, 2] .== [1, 3]
     [1, 2] .!= [1, 3]
+    [1, 2][1]
+    [1, 2][end]
+    [1, 2][end ÷ 2]
     begin
         x = [1, 2, 3]
         ans = begin

@@ -17,6 +17,7 @@ defaulthandlers() = Any[
     handle_macrocall,
     handle_vcat,
     handle_hcat,
+    handle_ref,
     handle_assignment,
     handle_inplace_materialize,
     handle_dotcall,
@@ -72,6 +73,34 @@ function handle_typed_hcat(lower, ex)
 end
 =#
 
+function handle_ref(lower, ex)
+    isexpr(ex, :ref) || return defer
+    statements, collection, indices = _handle_ref(lower, ex)
+    push!(statements, Expr(:call, Base.getindex, collection, indices...))
+    if length(statements) == 1
+        return statements[1]
+    else
+        return Expr(:block, statements...)
+    end
+end
+
+function _handle_ref(lower, ex)
+    statements = []
+    if length(ex.args) == 1
+        collection = ex.args[1]
+        indices = []
+    else
+        if ex.args[1] isa Symbol
+            collection = ex.args[1]
+        else
+            @gensym collection
+            push!(statements, :($collection = $(ex.args[1])))
+        end
+        indices = lower_indices(lower, collection, ex.args[2:end])
+    end
+    return statements, collection, indices
+end
+
 function handle_assignment(lower, ex)
     isexpr(ex, :(=)) || return defer
     lhs = Any[ex.args[1]]
@@ -89,19 +118,7 @@ end
 
 function _handle_assignment(lower, lhs, rhs)
     if isexpr(lhs, :ref)
-        statements = []
-        if length(lhs.args) == 1
-            collection = lhs.args[1]
-            indices = []
-        else
-            if lhs.args[1] isa Symbol
-                collection = lhs.args[1]
-            else
-                @gensym collection
-                push!(statements, :($collection = $(lhs.args[1])))
-            end
-            indices = lower_indices(lower, collection, lhs.args[2:end])
-        end
+        statements, collection, indices = _handle_ref(lower, lhs)
         push!(statements, Expr(:call, Base.setindex!, collection, rhs, indices...))
         return statements
     end
