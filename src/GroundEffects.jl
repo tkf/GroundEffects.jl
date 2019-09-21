@@ -20,6 +20,7 @@ defaulthandlers() = AbstractHandler[
     Handler{:vcat}(),
     Handler{:hcat}(),
     Handler{:.=}(),
+    DotCallHandler(),
     DotUpdateHandler(),
     RecursionHandler(),
 ]
@@ -62,6 +63,39 @@ function handle(::Handler{:.=}, lower, ex)
     @assert length(ex.args) == 2
     a1, a2 = map(lower, ex.args)
     return :($(Base.materialize!)($a1, $(Base.broadcasted)(identity, $a2)))
+end
+
+struct DotCallHandler <: AbstractHandler end
+
+function isdotopcall(ex)
+    ex isa Expr || return false
+    op = ex.args[1]
+    return op isa Symbol && Base.isoperator(op) && startswith(string(op), ".")
+end
+
+isdotcall(ex) =
+    isexpr(ex, :.) && length(ex.args) == 2 && isexpr(ex.args[2], :tuple)
+
+accept(::DotCallHandler, ex::Expr) = isdotopcall(ex) || isdotcall(ex)
+
+handle(::DotCallHandler, lower, ex) =
+    Expr(:call, Base.materialize, handle_lazy_dotcall(lower, ex))
+
+function handle_lazy_dotcall(lower, ex)
+    if isdotcall(ex)
+        args = [
+            lower(ex.args[1])
+            map(x -> handle_lazy_dotcall(lower, x), ex.args[2].args)
+        ]
+    elseif isdotopcall(ex)
+        args = [
+            Symbol(String(ex.args[1])[2:end])
+            map(x -> handle_lazy_dotcall(lower, x), ex.args[2:end])
+        ]
+    else
+        return lower(ex)
+    end
+    return Expr(:call, Base.broadcasted, args...)
 end
 
 struct DotUpdateHandler <: AbstractHandler end
