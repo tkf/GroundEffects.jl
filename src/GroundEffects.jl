@@ -44,6 +44,11 @@ handle_recursion(lower, ex::Expr) = Expr(ex.head, map(lower, ex.args)...)
 
 handle_macrocall(_, ex) = isexpr(ex, :macrocall) ? ex : defer
 
+#=
+function handle_vect(lower, ex)
+end
+=#
+
 function handle_vcat(lower, ex)
     isexpr(ex, :vcat) || return defer
     if all(isexpr.(ex.args, :row))
@@ -58,6 +63,14 @@ end
 
 handle_hcat(lower, ex) =
     isexpr(ex, :hcat) ? :($(Base.hcat)($(map(lower, ex.args)...))) : defer
+
+#=
+function handle_typed_vcat(lower, ex)
+end
+
+function handle_typed_hcat(lower, ex)
+end
+=#
 
 function handle_assignment(lower, ex)
     isexpr(ex, :(=)) || return defer
@@ -175,5 +188,16 @@ function handle_dotupdate(lower, ex)
         )
     end
 end
+
+#=
+function handle_comparison(lower, ex)
+end
+
+function handle_getproperty(lower, ex)
+end
+
+function handle_do(lower, ex)
+end
+=#
 
 end # module
