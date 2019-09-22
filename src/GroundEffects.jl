@@ -23,6 +23,7 @@ defaulthandlers() = Any[
     handle_dotcall,
     handle_dotupdate,
     handle_getproperty,
+    handle_do,
     handle_recursion,
 ]
 
@@ -160,7 +161,7 @@ function handle_inplace_materialize(lower, ex)
 end
 
 function isdotopcall(ex)
-    ex isa Expr || return false
+    ex isa Expr && !isempty(ex.args) || return false
     op = ex.args[1]
     return op isa Symbol && Base.isoperator(op) && startswith(string(op), ".")
 end
@@ -226,9 +227,10 @@ function handle_getproperty(lower, ex)
     return Expr(:call, Base.getproperty, lower(ex.args[1]), ex.args[2])
 end
 
-#=
 function handle_do(lower, ex)
+    isexpr(ex, :do) || return defer
+    call, lambda = map(lower, ex.args)
+    return Expr(call.head, call.args[1], lambda, call.args[2:end]...)
 end
-=#
 
 end # module

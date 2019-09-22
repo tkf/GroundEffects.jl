@@ -44,6 +44,8 @@ expressions_to_be_lowered = quote
         x .+= 2
     end
     im.re
+    identity() do; end()
+    identity(identity)() do; end()
 end |> statements
 
 @testset for ex in expressions_to_be_lowered
