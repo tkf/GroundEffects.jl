@@ -22,6 +22,7 @@ defaulthandlers() = Any[
     handle_inplace_materialize,
     handle_dotcall,
     handle_dotupdate,
+    handle_getproperty,
     handle_recursion,
 ]
 
@@ -121,6 +122,15 @@ function _handle_assignment(lower, lhs, rhs)
         statements, collection, indices = _handle_ref(lower, lhs)
         push!(statements, Expr(:call, Base.setindex!, collection, rhs, indices...))
         return statements
+    elseif isexpr(lhs, :.)
+        @assert length(lhs.args) == 2
+        return [Expr(
+            :call,
+            Base.setproperty!,
+            lower(lhs.args[1]),
+            lhs.args[2],
+            rhs,
+        )]
     end
     return [:($lhs = $rhs)]
 end
@@ -209,10 +219,14 @@ end
 #=
 function handle_comparison(lower, ex)
 end
+=#
 
 function handle_getproperty(lower, ex)
+    isexpr(ex, :.) || return defer
+    return Expr(:call, Base.getproperty, lower(ex.args[1]), ex.args[2])
 end
 
+#=
 function handle_do(lower, ex)
 end
 =#

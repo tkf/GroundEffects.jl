@@ -43,6 +43,7 @@ expressions_to_be_lowered = quote
         x = [1, 2, 3]
         x .+= 2
     end
+    im.re
 end |> statements
 
 @testset for ex in expressions_to_be_lowered
@@ -51,4 +52,14 @@ end |> statements
     actual = @eval $lex
     desired = @eval $ex
     @test actual == desired
+end
+
+mutable = Text("old")
+@testset "setproperty!" begin
+    ex = :(mutable.content = "new")
+    lex = GroundEffects.lower(ex)
+    @test ex != lex
+    result = @eval $lex
+    @test result == "new"
+    @test mutable.content == "new"
 end
