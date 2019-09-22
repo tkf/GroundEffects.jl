@@ -8,6 +8,9 @@ expressions_to_be_lowered = quote
     [1; 2]
     [1 2; 3 4]
     [1 2]
+    Any[1; 2]
+    Any[1 2; 3 4]
+    Any[1 2]
     ones(2) .+ 2
     identity.(ones(2) .+ 2)
     [1, 2] .== [1, 3]

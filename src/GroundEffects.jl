@@ -18,6 +18,8 @@ defaulthandlers() = Any[
     handle_vect,
     handle_vcat,
     handle_hcat,
+    handle_typed_vcat,
+    handle_typed_hcat,
     handle_ref,
     handle_assignment,
     handle_inplace_materialize,
@@ -68,13 +70,23 @@ end
 handle_hcat(lower, ex) =
     isexpr(ex, :hcat) ? :($(Base.hcat)($(map(lower, ex.args)...))) : defer
 
-#=
 function handle_typed_vcat(lower, ex)
+    isexpr(ex, :typed_vcat) || return defer
+    elements = ex.args[2:end]
+    if all(isexpr.(elements, :row))
+        rows = Tuple(length(a.args) for a in elements)
+        return :($(Base.typed_hvcat)($(lower(ex.args[1])), $rows, $((
+            lower(r) for a in elements for r in a.args
+        )...)))
+    else
+        return :($(Base.typed_vcat)($(map(lower, ex.args)...)))
+    end
 end
 
 function handle_typed_hcat(lower, ex)
+    isexpr(ex, :typed_hcat) || return defer
+    return :($(Base.typed_hcat)($(map(lower, ex.args)...)))
 end
-=#
 
 function handle_ref(lower, ex)
     isexpr(ex, :ref) || return defer
