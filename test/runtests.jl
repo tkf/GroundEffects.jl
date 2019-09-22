@@ -4,6 +4,7 @@ using Test
 statements(block) = filter(ex -> ex isa Expr, block.args)
 
 expressions_to_be_lowered = quote
+    [1, 2, 3, 4]
     [1; 2]
     [1 2; 3 4]
     [1 2]

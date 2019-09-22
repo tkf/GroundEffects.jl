@@ -15,6 +15,7 @@ lower(handlers::AbstractVector, ex::Expr) = Dispatcher(handlers)(ex)
 
 defaulthandlers() = Any[
     handle_macrocall,
+    handle_vect,
     handle_vcat,
     handle_hcat,
     handle_ref,
@@ -47,10 +48,10 @@ handle_recursion(lower, ex::Expr) = Expr(ex.head, map(lower, ex.args)...)
 
 handle_macrocall(_, ex) = isexpr(ex, :macrocall) ? ex : defer
 
-#=
 function handle_vect(lower, ex)
+    isexpr(ex, :vect) || return defer
+    return Expr(:call, Base.vect, map(lower, ex.args)...)
 end
-=#
 
 function handle_vcat(lower, ex)
     isexpr(ex, :vcat) || return defer
