@@ -30,9 +30,6 @@ defaulthandlers() = Any[
     handle_recursion,
 ]
 
-struct Defer end
-const defer = Defer()
-
 struct Dispatcher
     handlers::Vector{Any}
 end
@@ -40,23 +37,23 @@ end
 function (lower::Dispatcher)(ex)
     for h in lower.handlers
         y = h(lower, ex)
-        y === defer || return y
+        y === nothing || return something(y)
     end
     return ex
 end
 
-handle_recursion(lower, ::Any) = defer
+handle_recursion(lower, ::Any) = nothing
 handle_recursion(lower, ex::Expr) = Expr(ex.head, map(lower, ex.args)...)
 
-handle_macrocall(_, ex) = isexpr(ex, :macrocall) ? ex : defer
+handle_macrocall(_, ex) = isexpr(ex, :macrocall) ? ex : nothing
 
 function handle_vect(lower, ex)
-    isexpr(ex, :vect) || return defer
+    isexpr(ex, :vect) || return nothing
     return Expr(:call, Base.vect, map(lower, ex.args)...)
 end
 
 function handle_vcat(lower, ex)
-    isexpr(ex, :vcat) || return defer
+    isexpr(ex, :vcat) || return nothing
     if all(isexpr.(ex.args, :row))
         rows = Tuple(length(a.args) for a in ex.args)
         return :($(Base.hvcat)($rows, $((
@@ -68,10 +65,10 @@ function handle_vcat(lower, ex)
 end
 
 handle_hcat(lower, ex) =
-    isexpr(ex, :hcat) ? :($(Base.hcat)($(map(lower, ex.args)...))) : defer
+    isexpr(ex, :hcat) ? :($(Base.hcat)($(map(lower, ex.args)...))) : nothing
 
 function handle_typed_vcat(lower, ex)
-    isexpr(ex, :typed_vcat) || return defer
+    isexpr(ex, :typed_vcat) || return nothing
     elements = ex.args[2:end]
     if all(isexpr.(elements, :row))
         rows = Tuple(length(a.args) for a in elements)
@@ -84,12 +81,12 @@ function handle_typed_vcat(lower, ex)
 end
 
 function handle_typed_hcat(lower, ex)
-    isexpr(ex, :typed_hcat) || return defer
+    isexpr(ex, :typed_hcat) || return nothing
     return :($(Base.typed_hcat)($(map(lower, ex.args)...)))
 end
 
 function handle_ref(lower, ex)
-    isexpr(ex, :ref) || return defer
+    isexpr(ex, :ref) || return nothing
     statements, collection, indices = _handle_ref(lower, ex)
     push!(statements, Expr(:call, Base.getindex, collection, indices...))
     if length(statements) == 1
@@ -117,7 +114,7 @@ function _handle_ref(lower, ex)
 end
 
 function handle_assignment(lower, ex)
-    isexpr(ex, :(=)) || return defer
+    isexpr(ex, :(=)) || return nothing
     lhs = Any[ex.args[1]]
     rhs = ex.args[2]
     while isexpr(rhs, :(=))
@@ -156,7 +153,7 @@ function lower_index(lower, collection, index)
     ex = handle_dotcall(index) do ex
         lower_index(lower, collection, ex)
     end
-    ex === defer || return ex
+    ex === nothing || return something(ex)
 
     if isexpr(index, :call)
         return Expr(:call, lower_indices(lower, collection, index.args)...)
@@ -167,7 +164,7 @@ function lower_index(lower, collection, index)
 end
 
 function handle_inplace_materialize(lower, ex)
-    isexpr(ex, :.=) || return defer
+    isexpr(ex, :.=) || return nothing
     @assert length(ex.args) == 2
     a1, a2 = map(lower, ex.args)
     return :($(Base.materialize!)($a1, $(Base.broadcasted)(identity, $a2)))
@@ -183,7 +180,7 @@ isdotcall(ex) =
     isexpr(ex, :.) && length(ex.args) == 2 && isexpr(ex.args[2], :tuple)
 
 function handle_dotcall(lower, ex)
-    isdotcall(ex) || isdotopcall(ex) || return defer
+    isdotcall(ex) || isdotopcall(ex) || return nothing
     return Expr(:call, Base.materialize, handle_lazy_dotcall(lower, ex))
 end
 
@@ -205,9 +202,9 @@ function handle_lazy_dotcall(lower, ex)
 end
 
 function handle_dotupdate(lower, ex)
-    ex isa Expr || return defer
+    ex isa Expr || return nothing
     m = match(r"^(\.)?(([^.]+)=)$", string(ex.head))
-    m === nothing && return defer
+    m === nothing && return nothing
     # e.g., `ex.head == :.+=`
     op = Symbol(m.captures[3])  # e.g., `:+`
     @assert length(ex.args) == 2
@@ -236,12 +233,12 @@ end
 =#
 
 function handle_getproperty(lower, ex)
-    isexpr(ex, :.) || return defer
+    isexpr(ex, :.) || return nothing
     return Expr(:call, Base.getproperty, lower(ex.args[1]), ex.args[2])
 end
 
 function handle_do(lower, ex)
-    isexpr(ex, :do) || return defer
+    isexpr(ex, :do) || return nothing
     call, lambda = map(lower, ex.args)
     return Expr(call.head, call.args[1], lambda, call.args[2:end]...)
 end
